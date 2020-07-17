@@ -49,6 +49,68 @@ build_inputs_and_targets = vmap(build_input_and_target, in_axes=(None, 0))
 build_inputs_and_targets_jit = jit(build_inputs_and_targets,
                                    static_argnums=(0,))
 
+# MDG variants: returns per-trial biases, and one of these has a discrete bias # distribution (only for training LFADS, Integrator RNN trained on continuously
+# distributed biases)
+def build_input_and_target_pure_integration_MDG(input_params, key):
+  """Build white noise input and integration targets."""
+  bias_val, stddev_val, T, ntime = input_params
+  dt = T/ntime
+
+  # Create the white noise input.
+  key, skeys = utils.keygen(key, 2)
+
+  random_sample = random.uniform(next(skeys), (1,))[0]
+  bias = bias_val * 2.0 * (random_sample - 0.5)
+
+  stddev = stddev_val / np.sqrt(dt)
+  random_samples = random.normal(next(skeys), (ntime,))
+  noise_t = stddev * random_samples
+  white_noise_t = bias + noise_t
+
+  # * dt, intentionally left off to get output scaling in O(1).
+  targets_t = np.cumsum(white_noise_t)
+
+  bias_1x1 = np.expand_dims(np.array([bias,]), axis=1)
+  inputs_tx1 = np.expand_dims(white_noise_t, axis=1)
+  targets_tx1 = np.expand_dims(targets_t, axis=1)
+  return bias_1x1, inputs_tx1, targets_tx1
+
+def build_input_and_target_pure_integration_MDG_discrete(input_params, key):
+  """Build white noise input and integration targets."""
+  bias_val, stddev_val, T, ntime = input_params
+  dt = T/ntime
+
+  # Create the white noise input.
+  key, skeys = utils.keygen(key, 2)
+
+  # Variant with discrete bias values
+  n_vals = 10
+  bias_vals = np.linspace(-bias_val, bias_val, n_vals)
+  bias = random.choice(next(skeys), bias_vals, shape=(1,))[0]
+
+  stddev = stddev_val / np.sqrt(dt)
+  random_samples = random.normal(next(skeys), (ntime,))
+  noise_t = stddev * random_samples
+  white_noise_t = bias + noise_t
+
+  # * dt, intentionally left off to get output scaling in O(1).
+  targets_t = np.cumsum(white_noise_t)
+
+  bias_1x1 = np.expand_dims(np.array([bias,]), axis=1)
+  inputs_tx1 = np.expand_dims(white_noise_t, axis=1)
+  targets_tx1 = np.expand_dims(targets_t, axis=1)
+  return bias_1x1, inputs_tx1, targets_tx1
+
+# Now batch it and jit.
+build_inputs_and_targets_jit_MDG = jit(
+  vmap(build_input_and_target_pure_integration_MDG, in_axes=(None, 0)),
+  static_argnums=(0,))
+
+build_inputs_and_targets_jit_MDG_discrete = jit(
+  vmap(build_input_and_target_pure_integration_MDG_discrete,
+       in_axes=(None, 0)),
+  static_argnums=(0,))
+
 
 def plot_batch(ntimesteps, input_bxtxu, target_bxtxo=None, output_bxtxo=None,
                errors_bxtxo=None):
